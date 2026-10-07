@@ -1,6 +1,36 @@
 # AI-Powered-Resume-Analyzer
 AI-powered resume analysis, job matching, skill gap detection, and career guidance using four collaborating AI agents.
 
+## Features
+
+The project has exactly four AI agents:
+
+1. **Resume Analysis** (Gemini)
+2. **Job Matching** (JSearch)
+3. **Skill Gap Analysis** (Hugging Face, for unresolved skill names)
+4. **Career Guidance** (Apify market data)
+
+They are coordinated by a LangGraph workflow with a bounded critique/revision
+step (at most one revision; see "Workflow behavior").
+
+### Resume input
+
+The resume can be provided in either of these ways (not both at once):
+
+- Pasted resume text
+- PDF upload
+- TXT upload
+
+Uploads are limited to 5 MB. Files are read in memory to extract text; PDF
+extraction requires `pypdf` (included in `requirements.txt`). Password-protected,
+unreadable, empty, or unsupported files are rejected with a friendly message.
+
+### Job Matching
+
+The Job Matching agent calls the JSearch `/search-v2` endpoint. It accepts both
+the current response shape (`data` is an object with a `jobs` list) and the
+older shape (`data` is a list).
+
 ## Project Structure
 
 ```

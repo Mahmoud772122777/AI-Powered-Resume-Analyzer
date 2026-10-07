@@ -159,6 +159,35 @@ def test_invalid_response_shape():
     assert out["error_code"] == "invalid_response"
 
 
+def test_v2_data_dict_with_jobs():
+    payload = {"status": "OK", "data": {"jobs": [JOB_POOR, JOB_GOOD], "cursor": "abc"}}
+    legacy = jm.match_jobs(RESUME, target_role="x", fetcher=fetcher_returning(
+        {"data": [JOB_POOR, JOB_GOOD]}))
+    out = jm.match_jobs(RESUME, target_role="x", fetcher=fetcher_returning(payload))
+    assert out["status"] == "ok"
+    assert out["data"]["matches"] == legacy["data"]["matches"]
+    assert len(out["data"]["matches"]) == 2
+
+
+def test_v2_empty_jobs():
+    out = jm.match_jobs(RESUME, target_role="x",
+                        fetcher=fetcher_returning({"data": {"jobs": [], "cursor": ""}}))
+    assert out["status"] == "ok"
+    assert out["data"]["matches"] == [] and out["data"]["message"]
+
+
+@pytest.mark.parametrize("payload", [
+    {"data": {"cursor": "x"}},
+    {"data": {"jobs": "nope"}},
+    {"data": None},
+    {"status": "OK"},
+    ["not", "a", "dict"],
+])
+def test_v2_malformed_responses(payload):
+    out = jm.match_jobs(RESUME, target_role="x", fetcher=fetcher_returning(payload))
+    assert out["status"] == "error" and out["error_code"] == "invalid_response"
+
+
 def test_http_429_maps_to_rate_limited(monkeypatch):
     def boom(*a, **k):
         raise urllib.error.HTTPError("u", 429, "Too Many", {}, None)

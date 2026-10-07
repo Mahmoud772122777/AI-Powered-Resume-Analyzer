@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 API_HOST = "jsearch.p.rapidapi.com"
-API_URL = f"https://{API_HOST}/search"
+API_URL = f"https://{API_HOST}/search-v2"
 TIMEOUT_SECONDS = 20
 MAX_RESULTS = 10
 MAX_QUERY_CHARS = 120
@@ -271,6 +271,8 @@ def match_jobs(
         return _error("api_error", "The JSearch request failed. Please try again.")
 
     jobs = payload.get("data") if isinstance(payload, dict) else None
+    if isinstance(jobs, dict):  # /search-v2 shape: {"jobs": [...], "cursor": ...}
+        jobs = jobs.get("jobs")
     if not isinstance(jobs, list):
         return _error("invalid_response", "JSearch returned an unexpected response format.")
 
