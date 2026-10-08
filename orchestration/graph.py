@@ -74,6 +74,17 @@ def _executed(state: Dict[str, Any], node: str, result: Any, **extra: Any) -> Li
                   error_code=_code(result), **extra)
 
 
+def _skill_count(state: Dict[str, Any]) -> int:
+    data = (state.get("resume_analysis") or {}).get("data")
+    skills = data.get("skills") if isinstance(data, dict) else None
+    return len(skills) if isinstance(skills, list) else 0
+
+
+def _coverage(gaps: Any) -> Optional[Any]:
+    data = gaps.get("data") if isinstance(gaps, dict) else None
+    return data.get("coverage_percent") if isinstance(data, dict) else None
+
+
 def _alternative_query(state: Dict[str, Any]) -> Optional[str]:
     """Use a job-description title only when its terms form a strict subset of the role."""
     role = state.get("target_role")
@@ -98,7 +109,13 @@ def resume_node(state: AnalyzerState) -> Dict[str, Any]:
     result = update.get("resume_analysis")
     ok = _status(result) == "ok"
     nxt = "job_matching" if ok else "finalize"
-    trace = _executed(state, "resume_analysis", result)
+    skills = len(((result or {}).get("data") or {}).get("skills") or []) if isinstance(result, dict) else 0
+    trace = _executed(
+        state, "resume_analysis", result,
+        inputs_used=["resume_text"],
+        reason="Parse the resume into structured data (skills, education, experience) for the other agents.",
+        summary=f"{skills} skills extracted" if ok else "no parsed data produced",
+    )
     trace.append({
         "step": len(trace) + 1, "node": "router", "event": "decision",
         "decision": nxt,
@@ -111,14 +128,24 @@ def resume_node(state: AnalyzerState) -> Dict[str, Any]:
 def job_matching_node(state: AnalyzerState) -> Dict[str, Any]:
     update = job_matching.run(state)
     result = update.get("job_match")
+    count = len(_matches(result))
     return {**update, "trace": _executed(
-        state, "job_matching", result, matches=len(_matches(result)))}
+        state, "job_matching", result, matches=count,
+        inputs_used=[f"resume_analysis ({_skill_count(state)} skills)", "target_role / job_description"],
+        reason="Search live job listings for the target role and score each against the parsed resume.",
+        summary=f"{count} jobs matched")}
 
 
 def skill_gap_node(state: AnalyzerState) -> Dict[str, Any]:
     update = skill_gap_analysis.run(state)
     result = update.get("skill_gaps")
-    return {**update, "trace": _executed(state, "skill_gap_analysis", result)}
+    jobs = len(_matches(state.get("job_match")))
+    coverage = _coverage(result)
+    return {**update, "trace": _executed(
+        state, "skill_gap_analysis", result,
+        inputs_used=[f"job_matching ({jobs} jobs)", f"resume_analysis ({_skill_count(state)} skills)"],
+        reason="Compare the skills the jobs require with the skills on the resume.",
+        summary=f"coverage {coverage}%" if coverage is not None else "no coverage computed")}
 
 
 def critique_node(state: AnalyzerState) -> Dict[str, Any]:
@@ -190,7 +217,12 @@ def critique_node(state: AnalyzerState) -> Dict[str, Any]:
                 "unresolved": [i["code"] for i in issues if i["severity"] != "info"]}
     if revision:
         critique["revision"] = revision
-    trace = _trace(state, node="critique", event="executed", issues=[i["code"] for i in issues])
+    trace = _trace(
+        state, node="critique", event="executed", issues=[i["code"] for i in issues],
+        inputs_used=["job_matching", "skill_gap_analysis", "resume_analysis"],
+        reason="Cross-check the agents' outputs against quality rules and decide whether a retry is needed.",
+        summary=f"{len(issues)} issue(s) found" if issues else "no issues found",
+    )
     trace.append({
         "step": len(trace) + 1, "node": "router", "event": "decision", "decision": nxt,
         "reason": f"Revision requested: {revision['reason']}." if revision else
@@ -258,7 +290,11 @@ def career_guidance_node(state: AnalyzerState) -> Dict[str, Any]:
     result = update.get("career_guidance")
     source = (result or {}).get("data", {}).get("guidance_source") if isinstance(result, dict) \
         and isinstance(result.get("data"), dict) else None
-    return {**update, "trace": _executed(state, "career_guidance", result, guidance_source=source)}
+    return {**update, "trace": _executed(
+        state, "career_guidance", result, guidance_source=source,
+        inputs_used=["resume_analysis", "job_matching", "skill_gap_analysis"],
+        reason="Turn the earlier results plus live market data into guidance and next steps.",
+        summary=f"guidance source: {source}" if source else "guidance generated")}
 
 
 def finalize_node(state: AnalyzerState) -> Dict[str, Any]:

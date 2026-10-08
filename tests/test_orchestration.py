@@ -313,3 +313,23 @@ def test_low_coverage_without_alternative_query_is_reported_not_retried(monkeypa
     assert len(jobs) == 1
     assert not result["revision_history"]
     assert "low_skill_coverage" in result["critique"]["unresolved"]
+
+
+def test_trace_entries_explain_reason_and_inputs_used(monkeypatch):
+    job = [{"title": "Data Engineer", "match_score": 80}]
+    _patch_agents(monkeypatch, [80], [job])
+
+    result = run_pipeline("resume", "Data Engineer", target_role="Data Engineer")
+
+    executed = {e["node"]: e for e in result["trace"] if e["event"] == "executed"}
+    assert set(executed) == {
+        "resume_analysis", "job_matching", "skill_gap_analysis", "critique", "career_guidance",
+    }
+    for entry in executed.values():
+        assert entry["reason"]
+        assert entry["inputs_used"]
+        assert entry["summary"]
+    # agent communication: skill gap names what it received from job matching
+    assert "job_matching (1 jobs)" in executed["skill_gap_analysis"]["inputs_used"]
+    assert executed["skill_gap_analysis"]["summary"] == "coverage 80%"
+    assert executed["job_matching"]["summary"] == "1 jobs matched"
