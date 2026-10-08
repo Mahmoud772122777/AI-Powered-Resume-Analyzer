@@ -245,3 +245,71 @@ def test_resume_analysis_failure_stops_downstream_agents(monkeypatch):
     assert calls == []
     assert result["final_outcome"]["outcome"] == "stopped_resume_analysis_failed"
     assert result["final_outcome"]["agent_statuses"]["job_matching"] == "not_run"
+
+
+def _patch_agents(monkeypatch, coverage_by_call, matches_by_call):
+    """Fake all agents. Coverage/matches are returned per call number (1st, 2nd...)."""
+    jobs, gaps = [], []
+    monkeypatch.setattr(
+        resume_analysis, "run",
+        lambda state: {"resume_analysis": _ok({"skills": ["Python"]})},
+    )
+
+    def run_jobs(state):
+        jobs.append(state)
+        query = job_matching.build_query(state.get("target_role"), state["job_description"])
+        return {"job_match": _match(query, matches_by_call[len(jobs) - 1])}
+
+    def run_gaps(state):
+        gaps.append(state)
+        return {"skill_gaps": _ok({"coverage_percent": coverage_by_call[len(gaps) - 1]})}
+
+    monkeypatch.setattr(job_matching, "run", run_jobs)
+    monkeypatch.setattr(skill_gap_analysis, "run", run_gaps)
+    monkeypatch.setattr(
+        career_guidance, "run",
+        lambda state: {"career_guidance": _ok({"guidance_source": "fallback_no_market_data"})},
+    )
+    return jobs, gaps
+
+
+def test_low_coverage_triggers_one_revision_and_adopts_improvement(monkeypatch):
+    job = [{"title": "Data Engineer", "match_score": 50}]
+    jobs, gaps = _patch_agents(monkeypatch, [20, 65], [job, job])
+
+    result = run_pipeline(
+        "resume", "Data Engineer\nBuild data systems.", target_role="Senior Data Engineer",
+    )
+
+    assert len(jobs) == len(gaps) == 2
+    assert result["critique"]["issues"] == []  # second critique pass is clean
+    history = result["revision_history"]
+    assert len(history) == 1
+    assert history[0]["reason"] == "low_skill_coverage"
+    assert history[0]["outcome"] == "revised_results_adopted"
+    assert result["skill_gaps"]["data"]["coverage_percent"] == 65
+
+
+def test_low_coverage_revision_not_adopted_when_coverage_does_not_improve(monkeypatch):
+    job = [{"title": "Data Engineer", "match_score": 50}]
+    jobs, gaps = _patch_agents(monkeypatch, [20, 10], [job, job])
+
+    result = run_pipeline(
+        "resume", "Data Engineer\nBuild data systems.", target_role="Senior Data Engineer",
+    )
+
+    assert len(jobs) == 2  # never a second revision
+    assert result["revision_history"][0]["outcome"] == "revised_search_did_not_help"
+    assert result["skill_gaps"]["data"]["coverage_percent"] == 20  # original kept
+    assert "low_skill_coverage" in result["critique"]["unresolved"]
+
+
+def test_low_coverage_without_alternative_query_is_reported_not_retried(monkeypatch):
+    job = [{"title": "Data Engineer", "match_score": 50}]
+    jobs, gaps = _patch_agents(monkeypatch, [20], [job])
+
+    result = run_pipeline("resume", "Data Engineer", target_role="Data Engineer")
+
+    assert len(jobs) == 1
+    assert not result["revision_history"]
+    assert "low_skill_coverage" in result["critique"]["unresolved"]

@@ -166,6 +166,19 @@ def critique_node(state: AnalyzerState) -> Dict[str, Any]:
         matches = _matches(job_match)
         coverage = (gaps.get("data") or {}).get("coverage_percent") if isinstance(gaps, dict) else None
         top = matches[0].get("match_score") if matches else None
+        if matches and isinstance(coverage, (int, float)) and coverage < LOW_COVERAGE:
+            alt = _alternative_query(state)
+            recoverable = alt is not None and iteration < cap and revision is None
+            issues.append({
+                "code": "low_skill_coverage", "severity": "warning", "recoverable": recoverable,
+                "message": f"Skill coverage is only {coverage}% (below {LOW_COVERAGE}%)."
+                + (" A broader query derived from the job description will be tried."
+                   if recoverable else " No further retry is possible."),
+            })
+            if recoverable:
+                revision = {"reason": "low_skill_coverage",
+                            "action": "rerun_job_matching_and_skill_gap",
+                            "revised_query": alt}
         if isinstance(top, (int, float)) and isinstance(coverage, (int, float)) \
                 and top >= HIGH_MATCH and coverage < LOW_COVERAGE:
             issues.append({"code": "score_coverage_mismatch", "severity": "warning", "recoverable": False,
@@ -207,13 +220,23 @@ def revise_node(state: AnalyzerState) -> Dict[str, Any]:
     })
     update: Dict[str, Any] = {"iteration": state.get("iteration", 1) + 1}
     adopted = _status(revised) == "ok" and bool(_matches(revised))
+    gaps = skill_gap_analysis.run({**state, "job_match": revised})["skill_gaps"]
+    if revision["reason"] == "low_skill_coverage":
+        # Evidence-based decision: keep the revised results only if coverage improved.
+        old_cov = ((state.get("skill_gaps") or {}).get("data") or {}).get("coverage_percent")
+        new_cov = ((gaps or {}).get("data") or {}).get("coverage_percent") \
+            if isinstance(gaps, dict) else None
+        adopted = adopted and isinstance(old_cov, (int, float)) \
+            and isinstance(new_cov, (int, float)) and new_cov > old_cov
+        if adopted:
+            update["skill_gaps"] = gaps
+    else:
+        update["skill_gaps"] = gaps
     if adopted:
         update["job_match"] = revised
         outcome = "revised_results_adopted"
     else:
         outcome = "revised_search_did_not_help"
-    gaps = skill_gap_analysis.run({**state, "job_match": revised})["skill_gaps"]
-    update["skill_gaps"] = gaps
     trace.append({
         "step": len(trace) + 1, "node": "skill_gap_analysis", "event": "executed",
         "revision": True, "status": _status(gaps), "error_code": _code(gaps),
