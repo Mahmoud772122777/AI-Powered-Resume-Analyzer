@@ -58,7 +58,7 @@ def test_default_model_is_gemini_38_flash(monkeypatch):
     out = ra.analyze_resume("resume")
 
     assert out["status"] == "ok"
-    assert seen["model"] == "gemini-3.8-flash"
+    assert seen["model"] == "gemini-3.6-flash"
 
 
 def test_model_is_loaded_from_project_dotenv(monkeypatch):

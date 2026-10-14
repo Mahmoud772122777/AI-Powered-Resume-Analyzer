@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # JSON mode (response_mime_type) returned HTTP 503 in live tests while plain requests succeeded,
 # so the request is plain and the reply is parsed from text. Cause unproven.
 # Override with GEMINI_MODEL if Google retires or renames it.
-DEFAULT_MODEL = "gemini-3.8-flash"
+DEFAULT_MODEL = "gemini-3.6-flash"
 ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 MAX_RESUME_CHARS = 30000
 MAX_SERVER_ERROR_RETRIES = 2
